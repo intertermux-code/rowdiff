@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rowdiff"
+description = "Pushdown-first row diff for two database tables: chunked SQL checksums, row-level drift report, resumable"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { file = "LICENSE" }
+authors = [{ name = "Clawdyy" }]
+keywords = ["database", "diff", "data-diff", "checksum", "verification", "ci"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: SQL",
+  "Topic :: Database",
+  "Topic :: Software Development :: Testing",
+]
+dynamic = ["version"]
+dependencies = []
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.1"]
+mysql = ["PyMySQL>=1.0"]
+duckdb = ["duckdb>=0.9"]
+all = ["rowdiff[postgres,mysql,duckdb]"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+rowdiff = "rowdiff.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/intertermux-code/rowdiff"
+Source = "https://github.com/intertermux-code/rowdiff"
+Issues = "https://github.com/intertermux-code/rowdiff/issues"
+
+[tool.setuptools.dynamic]
+version = { attr = "rowdiff.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["rowdiff*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
