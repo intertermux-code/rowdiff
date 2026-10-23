@@ -1,0 +1,7 @@
+prune tests
+prune .pytest_cache
+prune rowdiff.egg-info
+global-exclude *.egg-info
+global-exclude *.py[cod]
+global-exclude __pycache__
+global-exclude .DS_Store

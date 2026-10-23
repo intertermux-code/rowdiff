@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import platform
 import sys
 
 from . import __version__
@@ -25,7 +26,8 @@ def build_parser():
         prog="rowdiff", description=DESCRIPTION,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", action="version",
-                        version="rowdiff %s" % __version__)
+                        version="rowdiff %s (Python %s)"
+                                % (__version__, platform.python_version()))
     sub = parser.add_subparsers(dest="command")
     sub.required = True
 

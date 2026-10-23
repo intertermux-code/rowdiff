@@ -1,5 +1,8 @@
 # rowdiff
 
+[![PyPI version](https://img.shields.io/pypi/v/rowdiff.svg)](https://pypi.org/project/rowdiff/)
+[![CI](https://github.com/intertermux-code/rowdiff/actions/workflows/test.yml/badge.svg)](https://github.com/intertermux-code/rowdiff/actions/workflows/test.yml)
+
 Cross-database row diff that computes checksums **inside** the databases
 instead of streaming both tables into Python.
 
@@ -350,7 +353,7 @@ rowdiff diff --left "$SRC" --right "$DST" --table orders --format json --quiet \
 
 ```sh
 pip install -e ".[dev]"
-pytest                      # 96 tests, no network, no servers
+pytest                      # 139 tests, no network, no servers
 pytest -q tests/test_diff_sqlite.py
 ```
 
@@ -358,6 +361,21 @@ The suite covers identical tables, added/removed/changed rows, composite keys,
 chunk tiling, interrupt-and-resume, error retry, MD5/SHA-256 parity,
 pushdown/fallback digest parity, the JSON contract, the CLI exit codes, and the
 SQL text emitted for every adapter.
+
+## Releasing
+
+1. Bump the version in `pyproject.toml` and `rowdiff/__init__.py`.
+2. `git tag vX.Y.Z`
+3. Push the tag: `git push origin vX.Y.Z`.
+
+`publish.yml` builds the sdist and wheel, runs `twine check`, and publishes to
+PyPI via OIDC trusted publishing. The workflow fails early if the tag version
+does not match `pyproject.toml`.
+
+One-time manual step: register the trusted publisher on pypi.org for project
+`rowdiff`, owner `intertermux-code/rowdiff`, workflow filename `publish.yml`,
+environment `pypi`. This must be done by the maintainer and cannot be
+automated.
 
 ## License
 
