@@ -40,3 +40,19 @@ def with_reading(rows, key, column, value):
             row[index] = value
         staged.append(tuple(row))
     return staged
+
+
+def reported_keys(report):
+    """Every primary key the row-level drill-down listed, across all chunks."""
+    keys = set()
+    for chunk in report["chunks"]:
+        detail = chunk["row_diff"]
+        if detail:
+            for kind in ("added", "removed"):
+                keys.update(pk[0] for pk in detail[kind])
+            keys.update(entry["pk"][0] for entry in detail["changed"])
+    return keys
+
+
+def chunk_row_counts(report, side="left"):
+    return [chunk[side]["row_count"] for chunk in report["chunks"]]

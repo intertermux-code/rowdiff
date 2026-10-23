@@ -26,11 +26,14 @@ class Options:
     def __init__(self, left, left_table, right, right_table, pk=None,
                  columns=None, chunk_size=5000, algorithm="md5",
                  state_file=DEFAULT_STATE_FILE, resume=True, pushdown=True,
-                 max_diff_rows=50):
+                 max_diff_rows=50, where=None):
         if chunk_size < 1:
-            raise ConfigError("--chunk-size must be at least 1")
+            raise ConfigError("--chunk-size must be a positive integer")
+        if chunk_size > 1000000:
+            raise ConfigError("--chunk-size must be at most 1000000")
         if max_diff_rows < 0:
             raise ConfigError("--max-diff-rows cannot be negative")
+        self.where = where
         self.left = parse_dsn(left)
         self.right = parse_dsn(right)
         self.left_table = left_table
@@ -62,11 +65,13 @@ class Side:
 
     def checksum(self, lo, hi, pushdown):
         return self.dialect.checksum_any(
-            self.conn, self.table, self.pk, self.columns, lo, hi, pushdown)
+            self.conn, self.table, self.pk, self.columns, lo, hi, pushdown,
+            where=getattr(self.dialect, "where", None))
 
     def rows(self, lo, hi):
         return self.dialect.fetch_rows(
-            self.conn, self.table, self.pk, self.columns, lo, hi)
+            self.conn, self.table, self.pk, self.columns, lo, hi,
+            where=getattr(self.dialect, "where", None))
 
 
 def run(options, progress=None):
@@ -78,6 +83,8 @@ def run(options, progress=None):
         right = Side(options.right, options.right_table, options.algorithm)
         sides.append(right)
         _align_columns(left, right, options)
+        left.dialect.where = options.where
+        right.dialect.where = options.where
         report = _diff(options, left, right, progress)
     finally:
         for side in sides:
@@ -118,9 +125,9 @@ def _diff(options, left, right, progress):
 def _plan(options, left, right):
     bounds = merge_boundaries(
         left.dialect.boundaries(left.conn, left.table, left.pk,
-                                options.chunk_size),
+                                options.chunk_size, where=options.where),
         right.dialect.boundaries(right.conn, right.table, right.pk,
-                                 options.chunk_size))
+                                 options.chunk_size, where=options.where))
     return plan_ranges(bounds)
 
 
@@ -132,6 +139,7 @@ def _open_state(options, left, right):
         "pk": [c.name for c in left.pk],
         "columns": [c.name for c in left.columns],
         "chunk_size": options.chunk_size,
+        "where": options.where,
         "algorithm": options.algorithm,
         "pushdown": options.pushdown,
     }
@@ -258,6 +266,7 @@ def _report(options, state, left, right, chunks):
         "right": _side_json(right),
         "options": {
             "chunk_size": options.chunk_size,
+            "where": options.where,
             "algorithm": options.algorithm,
             "pushdown": options.pushdown,
             "resumed": state.resumed,

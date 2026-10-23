@@ -67,8 +67,8 @@ class DuckDB(Dialect):
             return "MD5(%s)" % expr
         return "SHA256(%s)" % expr
 
-    def checksum_sql(self, table, pk, columns, lo, hi):
-        where, params = self.range_sql(pk, lo, hi)
+    def checksum_sql(self, table, pk, columns, lo, hi, where=None):
+        where, params = self.range_sql(pk, lo, hi, where=where)
         inner = self.digest(self.row_expr(columns))
         folded = "STRING_AGG(%s, '' ORDER BY %s)" % (inner, inner)
         return ("SELECT COUNT(*), %s FROM %s WHERE %s"

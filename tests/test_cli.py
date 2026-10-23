@@ -112,3 +112,46 @@ def test_version(capsys):
 def test_table_is_required(capsys):
     with pytest.raises(SystemExit):
         main(["diff", "--left", "sqlite://a", "--right", "sqlite://b"])
+
+
+@pytest.mark.parametrize("predicate,drift", [
+    ("id % 2 = 0", False),
+    ("id % 2 = 1", True),
+])
+def test_where_scopes_the_command_line_run(sqlite_pair, tmp_path, capsys,
+                                           predicate, drift):
+    """Row 41 is odd, so only the odd-keyed predicate can see it change."""
+    left, right = sqlite_pair(
+        mutate_right=lambda rows: with_row(rows, 41, "name", "renamed"))
+    code = main(argv(left, right, "--where", predicate, "--format", "json",
+                     "--quiet", state=str(tmp_path / "s.sqlite3")))
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["options"]["where"] == predicate
+    assert payload["drift"] is drift
+    assert payload["summary"]["rows"]["left_total"] == 60
+    assert code == (EXIT_DRIFT if drift else EXIT_OK)
+
+
+@pytest.mark.parametrize("chunk_size,message", [
+    (0, "positive integer"),
+    (-1, "positive integer"),
+    (1000001, "at most 1000000"),
+])
+def test_out_of_range_chunk_size_is_a_clean_error(chunk_size, message,
+                                                  sqlite_pair, tmp_path,
+                                                  capsys):
+    left, right = sqlite_pair()
+    code = main(argv(left, right, "--quiet", chunk_size=chunk_size,
+                     state=str(tmp_path / "s.sqlite3")))
+    assert code == EXIT_ERROR
+    assert message in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("chunk_size", [1, 1000000])
+def test_the_chunk_size_bounds_are_accepted(chunk_size, sqlite_pair, tmp_path,
+                                            capsys):
+    left, right = sqlite_pair()
+    code = main(argv(left, right, "--quiet", chunk_size=chunk_size,
+                     state=str(tmp_path / "s.sqlite3")))
+    assert code == EXIT_OK
+    assert capsys.readouterr().err == ""

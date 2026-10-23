@@ -48,6 +48,9 @@ def build_parser():
                            " repeatable (default: every column)")
     diff.add_argument("--chunk-size", type=int, default=5000, metavar="N",
                       help="distinct keys per chunk (default: 5000)")
+    diff.add_argument("--where", metavar="PREDICATE",
+                      help="raw SQL predicate applied to both sides"
+                           " (e.g. \"tenant_id = 42\")")
     diff.add_argument("--algorithm", choices=("md5", "sha256"), default="md5",
                       help="digest used for chunk checksums (default: md5)")
     diff.add_argument("--state", default=DEFAULT_STATE_FILE, metavar="PATH",
@@ -84,6 +87,7 @@ def main(argv=None):
                           right=args.right, right_table=right_table,
                           pk=args.pk, columns=args.columns,
                           chunk_size=args.chunk_size, algorithm=args.algorithm,
+                          where=args.where,
                           state_file=args.state, resume=args.resume,
                           pushdown=args.pushdown,
                           max_diff_rows=args.max_diff_rows)

@@ -97,8 +97,8 @@ class MySQL(Dialect):
             return "MD5(%s)" % expr
         return "SHA2(%s, 256)" % expr
 
-    def checksum_sql(self, table, pk, columns, lo, hi):
-        where, params = self.range_sql(pk, lo, hi)
+    def checksum_sql(self, table, pk, columns, lo, hi, where=None):
+        where, params = self.range_sql(pk, lo, hi, where=where)
         inner = self.digest(self.row_expr(columns))
         folded = "GROUP_CONCAT(%s ORDER BY %s SEPARATOR '')" % (inner, inner)
         return ("SELECT COUNT(*), %s FROM %s WHERE %s"

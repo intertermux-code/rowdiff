@@ -188,6 +188,7 @@ rowdiff diff [OPTIONS]
 | `--pk COLUMN` | declared PK | repeatable; order defines the key sort order |
 | `--columns COLUMN` | all columns | repeatable; the PK is always included |
 | `--chunk-size N` | `5000` | distinct keys per chunk |
+| `--where PREDICATE` | — | raw SQL predicate applied to both sides (e.g. `tenant_id = 42`) |
 | `--algorithm md5\|sha256` | `md5` | digest used for row and chunk hashes |
 | `--state PATH` | `.rowdiff-state.sqlite3` | SQLite file holding per-chunk results |
 | `--no-resume` | off | recompare every chunk, ignoring finished ones |
@@ -264,7 +265,7 @@ unless marked optional.
   },
   "right": { "…": "same shape as left" },
   "options": {
-    "chunk_size": 100, "algorithm": "md5", "pushdown": true,
+    "chunk_size": 100, "where": null, "algorithm": "md5", "pushdown": true,
     "resumed": false, "state_file": ".rowdiff-state.sqlite3",
     "max_diff_rows": 50
   },
@@ -327,6 +328,7 @@ rowdiff diff --left "$SRC" --right "$DST" --table orders --format json --quiet \
 * **Digest choice.** MD5 is the default because Postgres and MySQL make it
   cheap and chunk checksums are an equality test, not a security boundary. Use
   `--algorithm sha256` if a second-preimage matters to you.
+* **`--where` is raw SQL by design.** The predicate is interpolated into generated SQL on both sides without parameterization or validation; treat it like any ad-hoc SQL (review it, scope it to read-only, and never feed untrusted input). It is applied identically to chunking and row-report queries so the two cannot disagree about scope.
 * **Chunk sizes are key-count based, not byte based.** A chunk of 5000 rows of
   wide `TEXT` still transfers 5000 rows if that chunk mismatches.
 * **One key range per chunk, keys must be comparable.** Two sources whose key

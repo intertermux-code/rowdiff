@@ -81,11 +81,11 @@ class SQLite(Dialect):
         sep = " || " + self.sep_literal() + " || "
         return "(" + sep.join(self.column_expr(c) for c in columns) + ")"
 
-    def checksum_sql(self, table, pk, columns, lo, hi):
-        where, params = self.range_sql(pk, lo, hi)
+    def checksum_sql(self, table, pk, columns, lo, hi, where=None):
+        rng, params = self.range_sql(pk, lo, hi, where=where)
         return ("SELECT COUNT(*), %s(%s) FROM %s WHERE %s"
                 % (FOLD_FUNCTION, self.row_expr(columns),
-                   self.quote_table(table), where), params)
+                   self.quote_table(table), rng), params)
 
 
 def _quote(name):

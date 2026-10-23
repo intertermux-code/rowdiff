@@ -148,19 +148,22 @@ class Dialect:
 
     # -- chunk iteration ----------------------------------------------------
 
-    def boundaries_sql(self, table, pk, chunk_size):
+    def boundaries_sql(self, table, pk, chunk_size, where=None):
+        if where is None:
+            where = getattr(self, "where", None)
         names = ", ".join(self.quote(c.name) for c in pk)
+        inner_where = (" WHERE " + where) if where else ""
         return (
             "SELECT %s FROM (SELECT %s, row_number() OVER (ORDER BY %s) AS %s"
-            " FROM (SELECT DISTINCT %s FROM %s) %s) %s WHERE %s = 1 ORDER BY %s"
+            " FROM (SELECT DISTINCT %s FROM %s%s) %s) %s WHERE %s = 1 ORDER BY %s"
             % (names, names, names, self.quote("rowdiff_rn"), names,
-               self.quote_table(table), self.quote("rowdiff_d"),
+               self.quote_table(table), inner_where, self.quote("rowdiff_d"),
                self.quote("rowdiff_w"),
                self.mod(self.quote("rowdiff_rn"), chunk_size),
                self.quote("rowdiff_rn")))
 
-    def boundaries(self, conn, table, pk, chunk_size):
-        sql = self.boundaries_sql(table, pk, chunk_size)
+    def boundaries(self, conn, table, pk, chunk_size, where=None):
+        sql = self.boundaries_sql(table, pk, chunk_size, where=where)
         cur = conn.cursor()
         try:
             cur.execute(sql)
@@ -209,7 +212,7 @@ class Dialect:
             return self._row_value(pk, values, inclusive)
         return self._lex(pk, values, inclusive)
 
-    def range_sql(self, pk, lo, hi):
+    def range_sql(self, pk, lo, hi, where=None):
         """Half open ``[lo, hi)`` over the primary key, ``None`` means unbounded."""
         clauses, params = [], []
         if lo is not None:
@@ -220,6 +223,10 @@ class Dialect:
             sql, bound = self._cmp(pk, hi, False)
             clauses.append(sql)
             params.extend(bound)
+        if where is None:
+            where = getattr(self, "where", None)
+        if where:
+            clauses.append("(%s)" % where)
         if not clauses:
             return "1 = 1", []
         return " AND ".join(clauses), params
@@ -229,8 +236,8 @@ class Dialect:
     def checksum_sql(self, table, pk, columns, lo, hi):
         raise NotImplementedError
 
-    def checksum(self, conn, table, pk, columns, lo, hi):
-        sql, params = self.checksum_sql(table, pk, columns, lo, hi)
+    def checksum(self, conn, table, pk, columns, lo, hi, where=None):
+        sql, params = self.checksum_sql(table, pk, columns, lo, hi, where=where)
         cur = conn.cursor()
         try:
             cur.execute(sql, params)
@@ -260,15 +267,17 @@ class Dialect:
         return hashlib.new(
             self.algorithm, "".join(sorted(digests)).encode("ascii")).hexdigest()
 
-    def checksum_client(self, conn, table, pk, columns, lo, hi):
+    def checksum_client(self, conn, table, pk, columns, lo, hi, where=None):
         """``--no-pushdown`` path: ordered rows come back, the digest is ours."""
-        rows = self.fetch_rows(conn, table, pk, columns, lo, hi)
+        rows = self.fetch_rows(conn, table, pk, columns, lo, hi, where=where)
         return len(rows), self.client_digest(rows, columns)
 
-    def checksum_any(self, conn, table, pk, columns, lo, hi, pushdown=True):
+    def checksum_any(self, conn, table, pk, columns, lo, hi, pushdown=True, where=None):
+        if where is None:
+            where = getattr(self, "where", None)
         if pushdown and self.pushdown_available(conn):
-            return self.checksum(conn, table, pk, columns, lo, hi)
-        return self.checksum_client(conn, table, pk, columns, lo, hi)
+            return self.checksum(conn, table, pk, columns, lo, hi, where=where)
+        return self.checksum_client(conn, table, pk, columns, lo, hi, where=where)
 
     # -- rows ---------------------------------------------------------------
 
@@ -280,25 +289,27 @@ class Dialect:
                 ordered.append(column)
         return ordered
 
-    def select_sql(self, table, pk, columns, lo, hi):
+    def select_sql(self, table, pk, columns, lo, hi, where=None):
         names = ", ".join(self.quote(c.name) for c in self.selected(pk, columns))
         sql = "SELECT %s FROM %s" % (names, self.quote_table(table))
-        where, params = self.range_sql(pk, lo, hi)
-        sql += " WHERE " + where
+        rng, params = self.range_sql(pk, lo, hi, where=where)
+        sql += " WHERE " + rng
         sql += " ORDER BY " + ", ".join(
             "%s ASC" % self.quote(c.name) for c in pk)
         return sql, params
 
-    def fetch_rows(self, conn, table, pk, columns, lo, hi):
+    def fetch_rows(self, conn, table, pk, columns, lo, hi, where=None):
         """Ordered ``(key, canonical_values)`` for ``[lo, hi)``.
 
         ``canonical_values`` is a dict of column name to the same text the
         SQL expressions in :meth:`row_expr` would have produced, so the
         fallback checksum and the drill-down report agree with pushdown.
         """
+        if where is None:
+            where = getattr(self, "where", None)
         wanted = self.selected(pk, columns)
         out = []
-        sql, params = self.select_sql(table, pk, columns, lo, hi)
+        sql, params = self.select_sql(table, pk, columns, lo, hi, where=where)
         cur = conn.cursor()
         try:
             cur.execute(sql, params)

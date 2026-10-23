@@ -1,6 +1,7 @@
 import pytest
 
-from helpers import diff, with_extra_row, without_row, with_row
+from helpers import (chunk_row_counts, diff, reported_keys, without_row,
+                     with_extra_row, with_row)
 from rowdiff.engine import MATCHED, MISMATCHED
 
 
@@ -204,3 +205,132 @@ def test_missing_primary_key_is_a_config_error(tmp_path):
     from rowdiff.errors import ConfigError
     with pytest.raises(ConfigError, match="no primary key"):
         diff(left, right, table="loose", state_file=str(tmp_path / "s.sqlite3"))
+
+
+# -- --where scoping -------------------------------------------------------
+#
+# ``id % 2 = 0`` leaves a rejected key between every pair of accepted ones, so
+# a chunk range always holds rows the predicate excludes. A prefix predicate
+# like ``id < 60`` would only exercise the boundaries.
+
+
+def test_rows_outside_the_predicate_reach_neither_checksum_nor_report(
+        sqlite_pair, tmp_path):
+    extra = (121, "user-121", 181.5, "note 121", 1, b"fp-121")
+
+    def mutate(rows):
+        rows = with_extra_row(rows, extra)
+        return with_row(rows, 41, "name", "renamed")
+
+    left, right = sqlite_pair(mutate_right=mutate)
+    whole = diff(left, right, state_file=str(tmp_path / "all.sqlite3"))
+    assert whole["drift"] is True
+    assert (whole["summary"]["rows"]["added"],
+            whole["summary"]["rows"]["changed"]) == (1, 1)
+
+    scoped = diff(left, right, where="id % 2 = 0",
+                  state_file=str(tmp_path / "even.sqlite3"))
+    assert scoped["status"] == "ok"
+    assert scoped["drift"] is False
+    assert all(c["status"] == MATCHED for c in scoped["chunks"])
+    rows = scoped["summary"]["rows"]
+    assert (rows["added"], rows["removed"], rows["changed"]) == (0, 0, 0)
+    # 60 of the 120 keys satisfy the predicate, and planning sees only those.
+    assert rows["left_total"] == rows["right_total"] == 60
+    assert scoped["summary"]["chunks"]["planned"] == 3
+    assert chunk_row_counts(scoped) == [25, 25, 10]
+
+
+def test_the_predicate_sees_drift_inside_and_is_blind_outside(
+        sqlite_pair, tmp_path):
+    def mutate(rows):
+        rows = with_row(rows, 42, "name", "renamed")
+        return with_row(rows, 71, "note", "off predicate")
+
+    left, right = sqlite_pair(mutate_right=mutate)
+    scoped = diff(left, right, where="id % 2 = 0",
+                  state_file=str(tmp_path / "scoped.sqlite3"))
+    assert scoped["summary"]["rows"]["changed"] == 1
+    assert reported_keys(scoped) == {42}
+
+    whole = diff(left, right, state_file=str(tmp_path / "whole.sqlite3"))
+    assert whole["summary"]["rows"]["changed"] == 2
+    assert reported_keys(whole) == {42, 71}
+
+
+def test_scoped_verdicts_agree_across_chunk_sizes(sqlite_pair, tmp_path):
+    def mutate(rows):
+        rows = with_row(rows, 42, "name", "renamed")
+        return with_row(rows, 90, "score", 999.0)
+
+    left, right = sqlite_pair(mutate_right=mutate)
+    narrow = diff(left, right, chunk_size=7, where="id % 2 = 0",
+                  state_file=str(tmp_path / "narrow.sqlite3"))
+    # 5000 is the default chunk size: one chunk covers the whole key space.
+    wide = diff(left, right, chunk_size=5000, where="id % 2 = 0",
+                state_file=str(tmp_path / "wide.sqlite3"))
+
+    assert narrow["drift"] is wide["drift"] is True
+    assert narrow["summary"]["rows"] == wide["summary"]["rows"]
+    assert reported_keys(narrow) == reported_keys(wide) == {42, 90}
+    assert (narrow["summary"]["chunks"]["planned"]
+            > wide["summary"]["chunks"]["planned"])
+    for report in (narrow, wide):
+        assert sum(chunk_row_counts(report)) == 60
+        assert sum(chunk_row_counts(report, "right")) == 60
+
+
+def test_an_unchanged_diff_stays_clean_at_every_chunk_size(
+        sqlite_pair, tmp_path):
+    left, right = sqlite_pair()
+    reports = [diff(left, right, chunk_size=size, where="id % 3 = 0",
+                    state_file=str(tmp_path / ("%d.sqlite3" % size)))
+               for size in (1, 4, 25, 5000)]
+    assert all(r["drift"] is False for r in reports)
+    assert all(all(c["status"] == MATCHED for c in r["chunks"])
+               for r in reports)
+    assert {r["summary"]["rows"]["left_total"] for r in reports} == {40}
+    for report in reports:
+        assert sum(chunk_row_counts(report)) == 40
+
+
+def test_a_predicate_matching_nothing_compares_empty_chunks(
+        sqlite_pair, tmp_path):
+    left, right = sqlite_pair(
+        mutate_right=lambda rows: with_row(rows, 42, "name", "renamed"))
+    report = diff(left, right, where="id > 1000",
+                  state_file=str(tmp_path / "none.sqlite3"))
+    assert report["drift"] is False
+    assert report["summary"]["chunks"]["planned"] == 1
+    assert chunk_row_counts(report) == [0]
+    assert chunk_row_counts(report, "right") == [0]
+    assert report["summary"]["rows"]["left_total"] == 0
+
+
+def test_the_predicate_is_part_of_the_report(sqlite_pair, tmp_path):
+    left, right = sqlite_pair()
+    scoped = diff(left, right, where="active = 1",
+                  state_file=str(tmp_path / "opt.sqlite3"))
+    assert scoped["options"]["where"] == "active = 1"
+    # conftest sets active = 1 for every id that is not a multiple of three.
+    assert scoped["summary"]["rows"]["left_total"] == 80
+
+    unscoped = diff(left, right, state_file=str(tmp_path / "plain.sqlite3"))
+    assert unscoped["options"]["where"] is None
+
+
+def test_a_mismatch_is_still_drill_downable_under_a_predicate(
+        sqlite_pair, tmp_path):
+    """The row query carries the predicate too, so details omit excluded rows."""
+    def mutate(rows):
+        rows = with_row(rows, 44, "name", "renamed")
+        return with_row(rows, 44, "note", "also renamed")
+
+    left, right = sqlite_pair(mutate_right=mutate)
+    report = diff(left, right, where="id % 2 = 0",
+                  state_file=str(tmp_path / "drill.sqlite3"))
+    entry = [c for c in report["chunks"] if c["status"] == MISMATCHED][0]
+    assert entry["row_diff"]["changed"] == [
+        {"pk": [44], "columns": [
+            {"name": "name", "left": "user-044", "right": "renamed"},
+            {"name": "note", "left": "note 44", "right": "also renamed"}]}]

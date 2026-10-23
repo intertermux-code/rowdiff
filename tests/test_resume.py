@@ -105,11 +105,11 @@ def test_error_chunks_are_retried_on_the_next_run(monkeypatch, sqlite_pair,
     original = SQLite.checksum_sql
     calls = []
 
-    def flaky(self, table, pk, columns, lo, hi):
+    def flaky(self, table, pk, columns, lo, hi, where=None):
         calls.append(lo)
         if lo == (26,):
             raise RuntimeError("simulated backend failure")
-        return original(self, table, pk, columns, lo, hi)
+        return original(self, table, pk, columns, lo, hi, where=where)
 
     monkeypatch.setattr(SQLite, "checksum_sql", flaky)
     broken = diff(left, right, state_file=state)

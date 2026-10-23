@@ -182,3 +182,146 @@ def test_identifiers_are_quoted_and_ambiguous_ones_are_refused():
 def test_digest_algorithms_are_validated():
     with pytest.raises(Exception):
         SQLite(algorithm="sha1")
+
+
+# -- quoting edge cases ----------------------------------------------------
+#
+# Every statement is assembled out of user supplied names, so one unquoted
+# identifier is either a syntax error or, worse, a silently different table.
+# The names below need quoting for three different reasons: they contain a
+# space, they are mixed case, or they are reserved words.
+
+TRICKY_TABLE = "Analytics.Order Events"
+TRICKY_PK = [Column("Order Id", "INTEGER", is_pk=True)]
+TRICKY_COLUMNS = [
+    Column("Order Id", "INTEGER", is_pk=True),
+    Column("Customer Name", "TEXT"),
+    Column("select", "TEXT"),
+    Column("Group", "BOOLEAN"),
+    Column("2024 total", "NUMERIC"),
+    Column("raw data", "BLOB"),
+]
+TRICKY_NAMES = [c.name for c in TRICKY_COLUMNS] + ["Analytics", "Order Events"]
+# A boundaries query only mentions the key, the table, and the predicate.
+BOUNDARY_NAMES = ["Order Id", "Group", "Analytics", "Order Events"]
+
+# SQLite quotes like Postgres but expands ranges into column comparisons; its
+# own statements are pinned above and against live databases elsewhere.
+DIALECTS = [
+    (Postgres, '"Analytics"."Order Events"', "%s"),
+    (MySQL, "`Analytics`.`Order Events`", "%s"),
+    (DuckDB, '"Analytics"."Order Events"', "?"),
+]
+
+
+def assert_quoted_only(statement, dialect, names):
+    """Each of ``names`` may appear only inside its own quoting."""
+    for name in names:
+        token = dialect.quote(name)
+        assert token in statement, name
+        assert name not in statement.replace(token, ""), name
+
+
+@pytest.mark.parametrize("dialect_cls,quoted_table,placeholder", DIALECTS)
+def test_chunk_checksum_quotes_every_tricky_name(dialect_cls, quoted_table,
+                                                 placeholder):
+    dialect = dialect_cls()
+    statement, params = dialect.checksum_sql(TRICKY_TABLE, TRICKY_PK,
+                                             TRICKY_COLUMNS, (10,), (20,))
+    key = dialect.quote("Order Id")
+    assert ("FROM %s WHERE %s >= %s AND %s < %s"
+            % (quoted_table, key, placeholder, key, placeholder)) in statement
+    assert_quoted_only(statement, dialect, TRICKY_NAMES)
+    assert params == [10, 20]
+
+
+@pytest.mark.parametrize("dialect_cls,quoted_table,_placeholder", DIALECTS)
+def test_boundaries_quote_the_key_and_plan_inside_the_predicate(dialect_cls,
+                                                                quoted_table,
+                                                                _placeholder):
+    dialect = dialect_cls()
+    predicate = "%s = 1" % dialect.quote("Group")
+    statement = dialect.boundaries_sql(TRICKY_TABLE, TRICKY_PK, 100,
+                                       where=predicate)
+    planned = "SELECT DISTINCT %s FROM %s WHERE %s" % (
+        dialect.quote("Order Id"), quoted_table, predicate)
+    assert planned in statement
+    assert dialect.mod(dialect.quote("rowdiff_rn"), 100) + " = 1" in statement
+    assert_quoted_only(statement, dialect, BOUNDARY_NAMES)
+
+
+@pytest.mark.parametrize("dialect_cls,quoted_table,placeholder", DIALECTS)
+def test_drill_down_select_is_fully_quoted(dialect_cls, quoted_table,
+                                           placeholder):
+    dialect = dialect_cls()
+    statement, params = dialect.select_sql(TRICKY_TABLE, TRICKY_PK,
+                                           TRICKY_COLUMNS, (10,), None)
+    assert statement == "SELECT %s FROM %s WHERE %s >= %s ORDER BY %s ASC" % (
+        ", ".join(dialect.quote(c.name) for c in TRICKY_COLUMNS),
+        quoted_table, dialect.quote("Order Id"), placeholder,
+        dialect.quote("Order Id"))
+    assert params == [10]
+    assert_quoted_only(statement, dialect, TRICKY_NAMES)
+
+
+@pytest.mark.parametrize("dialect_cls,_quoted_table,placeholder", DIALECTS)
+def test_a_predicate_is_wrapped_so_it_cannot_rebind_the_range(dialect_cls,
+                                                              _quoted_table,
+                                                              placeholder):
+    """Unparenthesised, ``... AND x = 1 OR y`` would widen the chunk."""
+    dialect = dialect_cls()
+    predicate = "tenant = 42 OR %s IS NULL" % dialect.quote("Customer Name")
+    statement, params = dialect.checksum_sql(TRICKY_TABLE, TRICKY_PK,
+                                             TRICKY_COLUMNS, (10,), None,
+                                             where=predicate)
+    assert ("WHERE %s >= %s AND (%s)"
+            % (dialect.quote("Order Id"), placeholder, predicate)) in statement
+    assert params == [10]
+
+
+@pytest.mark.parametrize("dialect_cls,table,quoted", [
+    (Postgres, "sales.select", '"sales"."select"'),
+    (MySQL, "sales.select", "`sales`.`select`"),
+    (DuckDB, "sales.select", '"sales"."select"'),
+    (Postgres, "shop.Analytics.Order Events",
+     '"shop"."Analytics"."Order Events"'),
+    (MySQL, "shop.Analytics.Order Events",
+     "`shop`.`Analytics`.`Order Events`"),
+    (DuckDB, "shop.Analytics.Order Events",
+     '"shop"."Analytics"."Order Events"'),
+])
+def test_schema_qualified_tables_are_quoted_part_by_part(dialect_cls, table,
+                                                         quoted):
+    dialect = dialect_cls()
+    assert dialect.quote_table(table) == quoted
+    statement, _params = dialect.checksum_sql(table, TRICKY_PK, TRICKY_COLUMNS,
+                                              None, None)
+    assert " FROM %s WHERE 1 = 1" % quoted in statement
+    assert "FROM %s)" % quoted in dialect.boundaries_sql(table, TRICKY_PK, 50)
+
+
+def test_mixed_case_and_reserved_names_are_wrapped_by_each_dialect():
+    for dialect in (Postgres(), SQLite(), DuckDB()):
+        assert dialect.quote("Group") == '"Group"'
+        assert dialect.quote("2024 total") == '"2024 total"'
+        assert (dialect.quote_table("Analytics.Order Events")
+                == '"Analytics"."Order Events"')
+    assert MySQL().quote("Group") == "`Group`"
+    assert MySQL().quote("2024 total") == "`2024 total`"
+    assert (MySQL().quote_table("Analytics.Order Events")
+            == "`Analytics`.`Order Events`")
+
+
+def test_mysql_never_emits_a_double_quoted_identifier():
+    """MySQL reads "x" as a string literal, so it could not be a name."""
+    statement, _params = MySQL().checksum_sql(TRICKY_TABLE, TRICKY_PK,
+                                              TRICKY_COLUMNS, (10,), (20,))
+    assert '"' not in statement
+
+
+def test_duckdb_pairs_double_quoted_names_with_question_marks():
+    statement, params = DuckDB().checksum_sql(TRICKY_TABLE, TRICKY_PK,
+                                              TRICKY_COLUMNS, (10,), (20,))
+    assert 'WHERE "Order Id" >= ? AND "Order Id" < ?' in statement
+    assert "%s" not in statement
+    assert params == [10, 20]

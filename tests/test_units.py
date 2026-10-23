@@ -9,6 +9,7 @@ from rowdiff.chunking import (decode_key, decode_value, encode_key,
 from rowdiff.dialects.base import Column
 from rowdiff.dialects.sqlite import SQLite, make_fold_aggregate
 from rowdiff.dsn import parse_dsn
+from rowdiff.engine import Options
 from rowdiff.errors import ConfigError
 
 
@@ -41,6 +42,32 @@ def test_bad_uris_are_rejected():
 def test_dsn_repr_never_leaks_the_password():
     dsn = parse_dsn("mysql://root:pw@127.0.0.1/shop")
     assert "pw" not in repr(dsn)
+
+
+# -- request validation ----------------------------------------------------
+
+
+def options(chunk_size):
+    """An Options object for a run that never reaches a database."""
+    return Options(left="sqlite://left.db", left_table="users",
+                   right="sqlite://right.db", right_table="users",
+                   state_file="state.sqlite3", chunk_size=chunk_size)
+
+
+@pytest.mark.parametrize("chunk_size", [0, -1, -1000])
+def test_a_chunk_size_below_one_is_refused(chunk_size):
+    with pytest.raises(ConfigError, match="positive integer"):
+        options(chunk_size)
+
+
+def test_a_chunk_size_above_the_cap_is_refused():
+    with pytest.raises(ConfigError, match="at most 1000000"):
+        options(1000001)
+
+
+@pytest.mark.parametrize("chunk_size", [1, 1000000])
+def test_the_chunk_size_bounds_are_allowed(chunk_size):
+    assert options(chunk_size).chunk_size == chunk_size
 
 
 # -- type classification and canonical values ------------------------------

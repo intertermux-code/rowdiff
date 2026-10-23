@@ -5,8 +5,8 @@ from helpers import diff, with_row
 TOP = {"schema_version", "kind", "status", "drift", "generated_at", "left",
        "right", "options", "summary", "chunks", "duration_seconds"}
 SIDE = {"source", "dialect", "table", "primary_key", "columns"}
-OPTIONS = {"chunk_size", "algorithm", "pushdown", "resumed", "state_file",
-           "max_diff_rows"}
+OPTIONS = {"chunk_size", "where", "algorithm", "pushdown", "resumed",
+           "state_file", "max_diff_rows"}
 CHUNK_KEYS = {"index", "pk_range", "status", "left", "right", "rows",
               "row_diff", "cached"}
 CHUNK_SUMMARY = {"planned", "compared", "cached", "matched", "mismatched",
