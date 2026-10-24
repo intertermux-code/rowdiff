@@ -83,7 +83,11 @@ def _chunk_lines(chunk, report):
 
 
 def _range_label(rng, pk):
-    return "%s %s .. %s" % (",".join(pk), _fmt_values(rng["from"]),
+    # A single whole-table chunk has neither bound, so the lower one needs the
+    # same unbounded spelling as the upper.
+    return "%s %s .. %s" % (",".join(pk),
+                            _fmt_values(rng["from"]) if rng["from"] is not None
+                            else "-inf",
                             _fmt_values(rng["to"]) if rng["to"] is not None
                             else "inf")
 

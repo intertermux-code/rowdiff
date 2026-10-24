@@ -155,3 +155,16 @@ def test_the_chunk_size_bounds_are_accepted(chunk_size, sqlite_pair, tmp_path,
                      state=str(tmp_path / "s.sqlite3")))
     assert code == EXIT_OK
     assert capsys.readouterr().err == ""
+
+
+def test_unbounded_chunk_still_reads_as_text(sqlite_pair, tmp_path, capsys):
+    """``--chunk-size 1`` leaves the lower bound unset, unlike every other size."""
+    left, right = sqlite_pair(
+        mutate_right=lambda rows: with_row(rows, 42, "name", "renamed"))
+    code = main(argv(left, right, chunk_size=1,
+                     state=str(tmp_path / "s.sqlite3")))
+    out = capsys.readouterr().out
+    assert code == EXIT_DRIFT
+    assert "MISMATCHED chunk 0  id -inf .. inf" in out
+    assert "drift    0 added, 0 removed, 1 changed" in out
+    assert "~ id=42  name 'user-042' -> 'renamed'" in out
