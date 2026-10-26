@@ -228,11 +228,11 @@ Progress goes to stderr, the report to stdout, so `rowdiff diff … --format jso
 ## Resuming
 
 Every finished chunk is written to `--state` as `(status, counts, checksums,
-row diff)` keyed by a fingerprint of the request: dialects, sources, tables, key
-columns, compared columns, chunk size, algorithm and pushdown mode. Same
-command, same file, same plan — so a re-run after a crash, a `SIGTERM`, or a
-`Ctrl-C` skips the work already done and reports exactly what an uninterrupted
-run would have reported.
+row diff)` keyed by a fingerprint of the request: dialects, sources, tables,
+key columns, compared columns, the `--where` predicate, chunk size, algorithm
+and pushdown mode. Same command, same file, same plan — so a re-run after a
+crash, a `SIGTERM`, or a `Ctrl-C` skips the work already done and reports
+exactly what an uninterrupted run would have reported.
 
 ```sh
 rowdiff diff --left sqlite://a.db --right sqlite://b.db --table events   # interrupted
@@ -241,10 +241,14 @@ rowdiff diff --left sqlite://a.db --right sqlite://b.db --table events --no-resu
 ```
 
 Because the fingerprint is what makes a cached chunk reusable, a chunk that
-ended in an error is *not* recorded: the next run retries it. The flip side is
-that resume assumes the tables have not moved between runs. If they may have,
-use `--no-resume`, or point `--state` at a fresh file. The state file is
-append-only per run and safe to delete at any time.
+ended in an error is *not* recorded: the next run retries it. The chunk
+boundaries are recorded with the results, so resume also notices when the key
+space has moved underneath them: rows added or removed between two runs shift
+the boundaries, and a run whose plan no longer matches the one on disk throws
+away its cache and re-compares every chunk rather than reporting stale results.
+A run that is merely interrupted sees the same plan twice and skips the work
+already done. The state file stays append-only per run and safe to delete at
+any time, and `--no-resume` still re-compares everything into a run of its own.
 
 ## The drift report
 
@@ -353,7 +357,7 @@ rowdiff diff --left "$SRC" --right "$DST" --table orders --format json --quiet \
 
 ```sh
 pip install -e ".[dev]"
-pytest                      # 139 tests, no network, no servers
+pytest                      # 142 tests, no network, no servers
 pytest -q tests/test_diff_sqlite.py
 ```
 

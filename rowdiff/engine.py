@@ -108,8 +108,13 @@ def _align_columns(left, right, options):
 def _diff(options, left, right, progress):
     state = _open_state(options, left, right)
     try:
-        ranges = state.ranges or _plan(options, left, right)
-        state.ranges = ranges or [(None, None)]
+        plan = _plan(options, left, right) or [(None, None)]
+        if state.resumed and state.ranges != plan:
+            # The key space moved between the two runs, so every cached chunk
+            # answers for a range that no longer exists. Recompute rather than
+            # relabel old results onto new indices.
+            state.forget_chunks()
+        state.set_ranges(plan)
         chunks = []
         total = len(state.ranges)
         for index, (lo, hi) in enumerate(state.ranges):

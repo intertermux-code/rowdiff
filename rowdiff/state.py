@@ -79,6 +79,22 @@ class State:
     def total_chunks(self):
         return len(self.ranges)
 
+    def set_ranges(self, ranges):
+        """Record the plan, so the next run can tell whether it is still valid."""
+        if self.ranges == ranges:
+            return
+        self.ranges = ranges
+        self.conn.execute(
+            "UPDATE runs SET ranges = ? WHERE run_key = ?",
+            (json.dumps([_encode_range(r) for r in ranges],
+                        sort_keys=True, default=str), self.run_key))
+        self.conn.commit()
+
+    def forget_chunks(self):
+        self.conn.execute("DELETE FROM chunks WHERE run_key = ?",
+                          (self.run_key,))
+        self.conn.commit()
+
     def cached(self, index):
         row = self.conn.execute(
             "SELECT status, left_count, right_count, left_hash, right_hash,"

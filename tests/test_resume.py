@@ -1,3 +1,6 @@
+import json
+import sqlite3
+
 import pytest
 
 from helpers import diff, with_row
@@ -93,6 +96,38 @@ def test_a_different_chunk_size_is_a_different_run(sqlite_pair, tmp_path):
     report = diff(left, right, state_file=state, chunk_size=40)
     assert report["summary"]["chunks"]["cached"] == 0
     assert report["summary"]["chunks"]["planned"] == 3
+
+
+def test_the_plan_is_recorded_in_the_state_file(sqlite_pair, tmp_path):
+    """Cached chunks are keyed by index, so their ranges have to be on file."""
+    left, right = sqlite_pair()
+    state = str(tmp_path / "state.sqlite3")
+    first = diff(left, right, state_file=state)
+    recorded = json.loads(sqlite3.connect(state).execute(
+        "SELECT ranges FROM runs").fetchone()[0])
+    assert [{"from": r["from"], "to": r["to"]} for r in recorded] == \
+        [c["pk_range"] for c in first["chunks"]]
+
+
+def test_a_moved_key_space_is_not_answered_by_the_old_plan(sqlite_pair,
+                                                            tmp_path):
+    """Rows deleted between runs shift the boundaries; stale indices must not
+    be relabelled as answers for the ranges they never covered."""
+    left, right = sqlite_pair()
+    state = str(tmp_path / "state.sqlite3")
+    assert diff(left, right, state_file=state)["status"] == "ok"
+
+    conn = sqlite3.connect(right)
+    conn.execute("DELETE FROM users WHERE id = 1")
+    conn.commit()
+    conn.close()
+
+    report = diff(left, right, state_file=state)
+    assert report["status"] == "drift"
+    assert report["summary"]["rows"]["removed"] == 1
+    assert report["summary"]["chunks"]["cached"] == 0
+    assert report["summary"]["rows"]["left_total"] == 120
+    assert report["summary"]["rows"]["right_total"] == 119
 
 
 def test_error_chunks_are_retried_on_the_next_run(monkeypatch, sqlite_pair,
