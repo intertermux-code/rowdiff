@@ -18,19 +18,34 @@ from ..errors import ConfigError
 FOLD_FUNCTION = "rowdiff_fold"
 
 
-def make_fold_aggregate(algorithm):
+def make_fold_aggregate(algorithm, dialect=None):
     class _Fold:
         def __init__(self):
             self.rows = []
 
         def step(self, value):
-            text = "" if value is None else str(value)
-            self.rows.append(
-                hashlib.new(algorithm, text.encode("utf-8")).hexdigest())
+            try:
+                text = "" if value is None else str(value)
+                self.rows.append(
+                    hashlib.new(algorithm, text.encode("utf-8")).hexdigest())
+            except KeyboardInterrupt:
+                # sqlite3 converts every exception raised inside an aggregate
+                # callback into OperationalError, so a real interrupt would be
+                # recorded as a chunk error (exit 2) instead of the documented
+                # exit 130. Flag the dialect so the engine re-raises the
+                # interrupt after sqlite3 has swallowed it.
+                if dialect is not None:
+                    dialect._rowdiff_interrupted = True
+                raise
 
         def finalize(self):
-            joined = "".join(sorted(self.rows)).encode("ascii")
-            return hashlib.new(algorithm, joined).hexdigest()
+            try:
+                joined = "".join(sorted(self.rows)).encode("ascii")
+                return hashlib.new(algorithm, joined).hexdigest()
+            except KeyboardInterrupt:
+                if dialect is not None:
+                    dialect._rowdiff_interrupted = True
+                raise
 
     return _Fold
 
@@ -46,7 +61,18 @@ class SQLite(Dialect):
     def prepare(self, conn):
         if hasattr(conn, "create_aggregate"):
             conn.create_aggregate(FOLD_FUNCTION, 1,
-                                  make_fold_aggregate(self.algorithm))
+                                  make_fold_aggregate(self.algorithm, self))
+
+    def checksum(self, conn, table, pk, columns, lo, hi, where=None):
+        try:
+            return super().checksum(conn, table, pk, columns, lo, hi,
+                                    where=where)
+        except Exception as exc:
+            if getattr(self, "_rowdiff_interrupted", False):
+                # A real interrupt was swallowed by sqlite3 inside the fold
+                # aggregate: re-raise it so the CLI exits 130 as documented.
+                raise KeyboardInterrupt
+            raise
 
     def pushdown_available(self, conn):
         return hasattr(conn, "create_aggregate")

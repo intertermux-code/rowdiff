@@ -1,9 +1,11 @@
+import hashlib
 import json
+import sqlite3
 
 import pytest
 
 from helpers import with_row
-from rowdiff.cli import EXIT_DRIFT, EXIT_ERROR, EXIT_OK, main
+from rowdiff.cli import EXIT_DRIFT, EXIT_ERROR, EXIT_INTERRUPTED, EXIT_OK, main
 
 
 def argv(left, right, *extra, **kwargs):
@@ -168,3 +170,45 @@ def test_unbounded_chunk_still_reads_as_text(sqlite_pair, tmp_path, capsys):
     assert "MISMATCHED chunk 0  id -inf .. inf" in out
     assert "drift    0 added, 0 removed, 1 changed" in out
     assert "~ id=42  name 'user-042' -> 'renamed'" in out
+
+
+def test_interrupt_during_checksum_exits_130(sqlite_pair, tmp_path,
+                                             monkeypatch, capsys):
+    """A swallowed interrupt during checksumming exits 130, not 2.
+
+    A KeyboardInterrupt raised inside the fold aggregate is converted by
+    sqlite3 into OperationalError; the dialect records the interrupt and
+    SQLite.checksum re-raises it, so the CLI exits 130 as documented.
+    """
+    from rowdiff.cli import EXIT_INTERRUPTED
+
+    left, right = sqlite_pair()
+
+    def boom(*args, **kwargs):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(hashlib, "new", boom)
+
+    code = main(argv(left, right, state=str(tmp_path / "s.sqlite3")))
+    assert code == EXIT_INTERRUPTED
+    assert "interrupted" in capsys.readouterr().err
+
+
+def test_genuine_checksum_error_still_exits_2(sqlite_pair, tmp_path,
+                                              capsys, monkeypatch):
+    """A genuine database error during checksumming still exits 2.
+
+    Only an actual interrupt becomes 130: with the interrupt flag unset, a
+    real OperationalError from the same fold-aggregate path is recorded per
+    chunk and the run exits 2, so interrupts are never mistaken for errors.
+    """
+    left, right = sqlite_pair()
+
+    def boom(*args, **kwargs):
+        raise ValueError("cannot digest")
+
+    monkeypatch.setattr(hashlib, "new", boom)
+
+    code = main(argv(left, right, state=str(tmp_path / "s.sqlite3")))
+    assert code == EXIT_ERROR
+    assert "status   error" in capsys.readouterr().out

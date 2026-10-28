@@ -134,6 +134,87 @@ def test_empty_aggregate_is_the_digest_of_nothing():
     assert make_fold_aggregate("md5")().finalize() == SQLite().empty_digest()
 
 
+def test_fold_aggregate_flags_the_dialect_on_interrupt():
+    """A KeyboardInterrupt inside a callback flags the dialect and re-raises.
+
+    sqlite3 swallows exceptions raised inside aggregate callbacks into
+    OperationalError, so the dialect must remember the interrupt for the
+    engine to re-raise it as KeyboardInterrupt (exit 130) rather than record
+    a chunk error (exit 2).
+    """
+    dialect = SQLite("md5")
+    conn = sqlite3.connect(":memory:")
+    dialect.prepare(conn)
+    aggregate = make_fold_aggregate("md5", dialect)()
+
+    real_new = hashlib.new
+
+    def boom(*args, **kwargs):
+        raise KeyboardInterrupt()
+
+    hashlib.new = boom
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            aggregate.step("a row")
+        aggregate.rows = ["a row"]
+        with pytest.raises(KeyboardInterrupt):
+            aggregate.finalize()
+    finally:
+        hashlib.new = real_new
+
+    assert dialect._rowdiff_interrupted is True
+
+
+def test_checksum_re_raises_a_swallowed_interrupt(tmp_path, monkeypatch):
+    """OperationalError from an interrupted fold becomes KeyboardInterrupt.
+
+    Only with the dialect fix does a swallowed interrupt surface as
+    KeyboardInterrupt here; without it the engine would record a chunk error
+    (exit 2) instead of exiting 130.
+    """
+    from conftest import USERS_DDL, build, users
+
+    path = build(str(tmp_path / "d.db"), "users", USERS_DDL, users())
+    dialect = SQLite("md5")
+    conn = sqlite3.connect(path)
+    dialect.prepare(conn)
+    columns, pk = dialect.resolve(conn, "users", None, None)
+
+    def boom(*args, **kwargs):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(hashlib, "new", boom)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            dialect.checksum(conn, "users", pk, columns, None, None)
+    finally:
+        conn.close()
+
+    assert dialect._rowdiff_interrupted is True
+
+
+def test_checksum_passes_through_genuine_errors(tmp_path):
+    """A genuine OperationalError is not mistaken for an interrupt.
+
+    Without the interrupt flag the same path raises OperationalError, so
+    the engine keeps recording a chunk error and exiting 2.
+    """
+    from conftest import USERS_DDL, build, users
+
+    path = build(str(tmp_path / "d.db"), "users", USERS_DDL, users())
+    dialect = SQLite("md5")
+    conn = sqlite3.connect(path)
+    dialect.prepare(conn)
+    columns, pk = dialect.resolve(conn, "users", None, None)
+
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            dialect.checksum(conn, "users", pk, columns, None, None,
+                             where="no_such_column = 1")
+    finally:
+        conn.close()
+
+
 def test_udf_and_client_hashing_agree_on_a_chunk(tmp_path):
     from conftest import USERS_DDL, build, users
     path = build(str(tmp_path / "d.db"), "users", USERS_DDL, users())
