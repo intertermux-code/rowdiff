@@ -12,6 +12,7 @@ import hashlib
 import json
 import sqlite3
 import time
+import uuid
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -58,7 +59,10 @@ class State:
                            for r in json.loads(ranges_json)]
             self.resumed = True
         else:
-            suffix = "" if resume else _now()
+            # A random suffix, not a timestamp: two --no-resume runs can start
+            # within the same clock tick, and a shared identity then collides
+            # on the UNIQUE fingerprint below.
+            suffix = "" if resume else uuid.uuid4().hex
             self.run_key = hashlib.sha256(
                 (fingerprint + suffix).encode()).hexdigest()[:16]
             self.ranges = ranges

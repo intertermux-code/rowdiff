@@ -77,6 +77,41 @@ def test_no_resume_recompares_everything(sqlite_pair, tmp_path):
     assert not report["options"]["resumed"]
 
 
+def test_two_no_resume_runs_in_the_same_second_both_complete(
+        monkeypatch, sqlite_pair, tmp_path):
+    """A clock-tick identity let two --no-resume runs started in the same
+    second collide on the UNIQUE run fingerprint."""
+    monkeypatch.setattr("rowdiff.state._now",
+                        lambda: "2026-10-31T00:00:00")
+    left, right = sqlite_pair(
+        mutate_right=lambda rows: with_row(rows, 42, "name", "renamed"))
+    state = str(tmp_path / "state.sqlite3")
+    first = diff(left, right, state_file=state, resume=False)
+    second = diff(left, right, state_file=state, resume=False)
+
+    assert first["drift"] is True
+    assert second["summary"]["rows"] == first["summary"]["rows"]
+    assert second["summary"]["chunks"]["cached"] == 0
+
+
+def test_resume_still_reuses_state_after_a_no_resume_run(monkeypatch,
+                                                         sqlite_pair,
+                                                         tmp_path):
+    monkeypatch.setattr("rowdiff.state._now",
+                        lambda: "2026-10-31T00:00:00")
+    left, right = sqlite_pair(
+        mutate_right=lambda rows: with_row(rows, 42, "name", "renamed"))
+    state = str(tmp_path / "state.sqlite3")
+    diff(left, right, state_file=state)
+    diff(left, right, state_file=state, resume=False)
+    report = diff(left, right, state_file=state)
+
+    assert report["options"]["resumed"] is True
+    assert report["summary"]["chunks"]["cached"] == 5
+    assert report["summary"]["chunks"]["compared"] == 0
+
+
+
 def test_resume_survives_a_state_file_change_of_directory(sqlite_pair, tmp_path):
     """The state file is the only memory the run has; it must be self contained."""
     left, right = sqlite_pair(
