@@ -181,7 +181,9 @@ class Dialect:
 
         Only the final disjunct may compare inclusively: ``a >= x`` on its own
         would also accept ``a == x`` with a smaller ``b``, which overlaps the
-        previous chunk.
+        previous chunk. ``None`` sorts first (the SQLite convention used for
+        boundary planning), so a NULL key component is handled with ``IS NULL``
+        instead of being compared directly, which SQL can never do.
         """
         last = ">=" if inclusive else "<"
         strict = ">" if inclusive else "<"
@@ -190,13 +192,28 @@ class Dialect:
         for i in range(len(pk)):
             conds = []
             for j in range(i):
-                conds.append("%s = %s" % (self.quote(pk[j].name), self.placeholder))
-                params.append(values[j])
-            conds.append("%s %s %s" % (self.quote(pk[i].name),
-                                       last if i == len(pk) - 1 else strict,
-                                       self.placeholder))
-            params.append(values[i])
-            parts.append("(%s)" % " AND ".join(conds))
+                if values[j] is None:
+                    conds.append("%s IS NULL" % self.quote(pk[j].name))
+                else:
+                    conds.append("%s = %s" % (self.quote(pk[j].name), self.placeholder))
+                    params.append(values[j])
+            if values[i] is None:
+                if inclusive and i == len(pk) - 1:
+                    # NULL is the least key value: nothing restricts a final
+                    # ">= NULL" disjunct, so prior equality alone qualifies.
+                    pass
+                elif not inclusive:
+                    # Nothing is strictly below NULL.
+                    conds.append("0 = 1")
+                else:
+                    # NULL is the least key value: only non-NULL values are > NULL.
+                    conds.append("%s IS NOT NULL" % self.quote(pk[i].name))
+            else:
+                conds.append("%s %s %s" % (self.quote(pk[i].name),
+                                           last if i == len(pk) - 1 else strict,
+                                           self.placeholder))
+                params.append(values[i])
+            parts.append("(%s)" % " AND ".join(conds) if conds else "(1 = 1)")
         return "(%s)" % " OR ".join(parts), params
 
     def _row_value(self, pk, values, inclusive):
@@ -221,6 +238,11 @@ class Dialect:
             params.extend(bound)
         if hi is not None:
             sql, bound = self._cmp(pk, hi, False)
+            if lo is not None and lo[0] is None and hi is not None and hi[0] is not None:
+                lower_sql, lower_bound = self._cmp(pk, lo, True)
+                sql = "(%s OR (%s IS NULL AND %s))" % (
+                    sql, self.quote(pk[0].name), lower_sql)
+                bound = bound + lower_bound
             clauses.append(sql)
             params.extend(bound)
         if where is None:

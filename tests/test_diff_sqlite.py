@@ -1,8 +1,10 @@
+import sqlite3
+
 import pytest
 
 from helpers import (chunk_row_counts, diff, reported_keys, without_row,
                      with_extra_row, with_row)
-from rowdiff.engine import MATCHED, MISMATCHED
+from rowdiff.engine import MATCHED, MISMATCHED, Options, run
 
 
 def test_identical_tables_show_no_drift(sqlite_pair, tmp_path):
@@ -334,3 +336,140 @@ def test_a_mismatch_is_still_drill_downable_under_a_predicate(
         {"pk": [44], "columns": [
             {"name": "name", "left": "user-044", "right": "renamed"},
             {"name": "note", "left": "note 44", "right": "also renamed"}]}]
+
+
+# -- NULL primary keys -------------------------------------------------------
+
+NULLS_DDL = "CREATE TABLE nulls (id TEXT, name TEXT NOT NULL, PRIMARY KEY (id))"
+
+
+def _build_nulls(path, rows):
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(NULLS_DDL)
+        conn.executemany("INSERT INTO nulls VALUES (?, ?)", rows)
+        conn.commit()
+    finally:
+        conn.close()
+    return path
+
+
+def _nulls_pair(tmp_path, left_rows, right_rows):
+    paths = []
+    for name, rows in (("left", left_rows), ("right", right_rows)):
+        paths.append(_build_nulls(str(tmp_path / ("%s.db" % name)), rows))
+    return paths
+
+
+def _nulls_diff(tmp_path, left_rows, right_rows, **kwargs):
+    kwargs.setdefault("chunk_size", 25)
+    left, right = _nulls_pair(tmp_path, left_rows, right_rows)
+    options = Options(left="sqlite://%s" % left, left_table="nulls",
+                      right="sqlite://%s" % right, right_table="nulls",
+                      **kwargs)
+    return run(options)
+
+
+def test_null_pk_rows_that_differ_report_drift(tmp_path):
+    """Tables that differ only in NULL primary-key rows are drift, exit 1.
+
+    The NULL-pk row is named in the drill-down instead of being silently
+    skipped.
+    """
+    base = [("id-%02d" % i, "user-%02d" % i) for i in range(1, 31)]
+    left = base + [(None, "keep")]
+    right = base + [(None, "change")]
+    report = _nulls_diff(tmp_path, left, right)
+
+    assert report["status"] == "drift"
+    assert report["drift"] is True
+    rows = report["summary"]["rows"]
+    assert (rows["added"], rows["removed"], rows["changed"]) == (0, 0, 1)
+    assert rows["left_total"] == 31
+    assert rows["right_total"] == 31
+    bad = [c for c in report["chunks"] if c["status"] == MISMATCHED]
+    assert len(bad) == 1
+    assert bad[0]["row_diff"]["changed"] == [
+        {"pk": [None], "columns": [
+            {"name": "name", "left": "keep", "right": "change"}]}]
+    assert reported_keys(report) == {None}
+
+
+def test_null_pk_rows_that_differ_count_all_rows(tmp_path):
+    """Several NULL-pk rows are compared as a group and counted in totals."""
+    base = [("id-%02d" % i, "user-%02d" % i) for i in range(1, 31)]
+    left = base + [(None, "alpha"), (None, "bravo"), (None, "charlie")]
+    right = base + [(None, "ALPHA"), (None, "BRAVO"), (None, "CHARLIE")]
+    report = _nulls_diff(tmp_path, left, right)
+
+    assert report["status"] == "drift"
+    assert report["drift"] is True
+    assert report["summary"]["rows"]["changed"] >= 1
+    assert report["summary"]["rows"]["left_total"] == 33
+    assert report["summary"]["rows"]["right_total"] == 33
+    assert reported_keys(report) == {None}
+
+
+def test_identical_null_pk_rows_show_no_drift(tmp_path):
+    """Identical tables that contain NULL primary keys still report ok."""
+    base = [("id-%02d" % i, "user-%02d" % i) for i in range(1, 31)]
+    rows = base + [(None, "n-1"), (None, "n-2")]
+    report = _nulls_diff(tmp_path, rows, rows)
+
+    assert report["status"] == "ok"
+    assert report["drift"] is False
+    assert report["summary"]["chunks"]["mismatched"] == 0
+    assert report["summary"]["chunks"]["errors"] == 0
+    rows = report["summary"]["rows"]
+    assert (rows["added"], rows["removed"], rows["changed"]) == (0, 0, 0)
+    assert rows["left_total"] == 32
+    assert rows["right_total"] == 32
+
+
+def test_composite_pk_null_first_multi_chunk_single_detail(tmp_path):
+    """Composite NULL-first PK across multi-chunk ranges gives exact totals and one detail entry."""
+    ddl = "CREATE TABLE t (a TEXT, b TEXT NOT NULL, c TEXT NOT NULL, PRIMARY KEY (a,b))"
+
+    def build(path, rows):
+        conn = sqlite3.connect(path)
+        try:
+            conn.execute(ddl)
+            conn.executemany("INSERT INTO t VALUES (?,?,?)", rows)
+            conn.commit()
+        finally:
+            conn.close()
+
+    base_null = [(None, f"b{i:02d}", f"v{i:02d}") for i in range(1, 41)]
+    base_x = [("x", f"x{i:02d}", f"xv{i:02d}") for i in range(1, 21)]
+    left = base_null + base_x
+    right = [list(r) for r in left]
+    for i, (a, b, c) in enumerate(right):
+        if a is None and b == "b30":
+            right[i] = (None, "b30", "CHANGED")
+            break
+    right = [tuple(r) for r in right]
+
+    leftp = tmp_path / "left.db"
+    rightp = tmp_path / "right.db"
+    build(str(leftp), left)
+    build(str(rightp), right)
+    options = Options(left="sqlite://%s" % leftp, left_table="t",
+                      right="sqlite://%s" % rightp, right_table="t",
+                      chunk_size=25)
+    report = run(options)
+
+    assert report["status"] == "drift"
+    assert report["drift"] is True
+    rows = report["summary"]["rows"]
+    assert rows["left_total"] == 60
+    assert rows["right_total"] == 60
+    assert rows["changed"] == 1
+    assert (rows["added"], rows["removed"]) == (0, 0)
+    changed = []
+    for chunk in report["chunks"]:
+        rd = chunk.get("row_diff") or {}
+        changed.extend(rd.get("changed", []))
+    assert len(changed) == 1
+    assert changed[0]["pk"] == [None, "b30"]
+    assert changed[0]["columns"][0]["name"] == "c"
+

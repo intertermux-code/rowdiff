@@ -23,11 +23,21 @@ def merge_boundaries(*key_lists):
     for keys in key_lists:
         merged.update(keys)
     try:
-        return sorted(merged)
+        return sorted(merged, key=_boundary_sort_key)
     except TypeError as exc:
         raise ConfigError(
             "primary key values from the two sources are not comparable (%s);"
             " both sides must use the same key type" % exc) from exc
+
+
+def _boundary_sort_key(key):
+    """Order boundary keys the way SQLite does: NULL first.
+
+    A real key value and ``None`` can never be compared directly in Python 3,
+    so each component is wrapped: NULL sorts first and is never compared
+    against a real value, while real values keep their original relative order.
+    """
+    return tuple((0,) if value is None else (1, value) for value in key)
 
 
 def plan_ranges(bounds):

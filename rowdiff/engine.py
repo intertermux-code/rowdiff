@@ -218,18 +218,21 @@ def _chunk(options, state, index, lo, hi, left, right):
 
 
 def _row_diff(options, left, right, lo, hi):
-    left_rows = dict(left.rows(lo, hi))
-    right_rows = dict(right.rows(lo, hi))
+    left_rows = list(left.rows(lo, hi))
+    right_rows = list(right.rows(lo, hi))
     names = [c.name for c in left.columns]
-    added = [k for k in _sorted_keys(right_rows) if k not in left_rows]
-    removed = [k for k in _sorted_keys(left_rows) if k not in right_rows]
+    left_by_key = _rows_by_key(left_rows)
+    right_by_key = _rows_by_key(right_rows)
+    added = [k for k in _sorted_keys(right_by_key) if k not in left_by_key]
+    removed = [k for k in _sorted_keys(left_by_key) if k not in right_by_key]
     changed = []
-    for key in _sorted_keys(left_rows):
-        other = right_rows.get(key)
-        if other is None or other == left_rows[key]:
+    for key in _sorted_keys(left_by_key):
+        other = right_by_key.get(key)
+        if other is None or left_by_key[key] == other:
             continue
-        columns = [{"name": n, "left": left_rows[key][n], "right": other[n]}
-                   for n in names if left_rows[key][n] != other[n]]
+        columns = [{"name": n, "left": left_by_key[key][0][n],
+                    "right": other[0][n]}
+                   for n in names if left_by_key[key][0][n] != other[0][n]]
         changed.append({"pk": _key_json(key), "columns": columns})
 
     limit = options.max_diff_rows
@@ -243,6 +246,18 @@ def _row_diff(options, left, right, lo, hi):
     return {"counts": {"added": len(added), "removed": len(removed),
                        "changed": len(changed)},
             "detail": detail}
+
+
+def _rows_by_key(rows):
+    """Group fetched rows by primary key, keeping every row.
+
+    A plain ``dict`` would collapse rows that share a key (NULL primary keys
+    are allowed to repeat), silently dropping the duplicates from the diff.
+    """
+    grouped = {}
+    for key, values in rows:
+        grouped.setdefault(key, []).append(values)
+    return grouped
 
 
 def _report(options, state, left, right, chunks):
@@ -336,7 +351,15 @@ def _sorted_keys(mapping):
     try:
         return sorted(keys)
     except TypeError:
-        return sorted(keys, key=lambda k: [_json_value(v) for v in k])
+        return sorted(keys, key=lambda k: [_json_sort_key(v) for v in k])
+
+
+def _json_sort_key(value):
+    """Sort key that places NULL first (like SQLite) without comparing it to
+    real values, which Python 3 forbids."""
+    if value is None:
+        return (0,)
+    return (1, _json_value(value))
 
 
 def _explain(exc):
