@@ -64,7 +64,7 @@ class Postgres(Dialect):
         if column.category == "bytes":
             return "(CASE WHEN %s IS NULL THEN %s ELSE 'x' ||" \
                    " UPPER(ENCODE(%s, 'hex')) END)" % (ref, null, ref)
-        return "(COALESCE(CAST(%s AS TEXT), %s))" % (ref, null)
+        return "(COALESCE(REPLACE(CAST(%s AS TEXT), '\\', '\\\\'), %s))" % (ref, null)
 
     def row_expr(self, columns):
         return "(CONCAT_WS(%s, %s))" % (

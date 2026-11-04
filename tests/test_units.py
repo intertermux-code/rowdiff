@@ -289,3 +289,10 @@ def test_key_values_survive_the_state_file_round_trip():
     assert decode_value(encode_value(moment)) == moment
     assert decode_value(encode_value(b"\x01\x02")) == b"\x01\x02"
     assert decode_value(encode_value(True)) is True
+
+
+def test_normalize_backslash_distinct():
+    assert values.normalize(None, values.TEXT) == "\\N"
+    assert values.normalize("\\N", values.TEXT) == "\\\\N"
+    assert values.normalize("\\\\N", values.TEXT) == "\\\\\\\\N"
+    assert values.normalize("plain", values.TEXT) == "plain"

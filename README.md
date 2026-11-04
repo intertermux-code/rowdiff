@@ -357,7 +357,7 @@ rowdiff diff --left "$SRC" --right "$DST" --table orders --format json --quiet \
 
 ```sh
 pip install -e ".[dev]"
-pytest                      # 153 tests, no network, no servers
+pytest                      # 157 tests, no network, no servers
 pytest -q tests/test_diff_sqlite.py
 ```
 

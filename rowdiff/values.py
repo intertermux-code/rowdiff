@@ -86,7 +86,7 @@ def normalize(value, category):
         return _normalize_number(value)
     if isinstance(value, (datetime.date, datetime.time, datetime.datetime)):
         return _normalize_temporal(value)
-    return str(value)
+    return str(value).replace("\\", "\\\\")
 
 
 def _normalize_bool(value):

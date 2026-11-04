@@ -38,7 +38,7 @@ def test_sqlite_folds_rows_through_a_registered_aggregate():
     statement, params = sql(SQLite(), lo=None, hi=None)
     assert statement.startswith("SELECT COUNT(*), rowdiff_fold(")
     assert "FROM \"users\" WHERE 1 = 1" in statement
-    assert "COALESCE(CAST(\"note\" AS TEXT), '\\N')" in statement
+    assert "COALESCE(REPLACE(CAST(\"note\" AS TEXT), '\\', '\\\\'), '\\N')" in statement
     assert "|| char(31) ||" in statement
     assert "CASE WHEN \"active\" IS NULL" in statement
     assert "'x' || HEX(\"fingerprint\")" in statement
@@ -75,7 +75,7 @@ def test_postgres_pushes_the_digest_into_the_database():
     assert statement.count("ORDER BY MD5(") == 1
     assert statement.startswith("SELECT COUNT(*), MD5(STRING_AGG(")
     assert "CONCAT_WS(chr(31)" in statement
-    assert "COALESCE(CAST(\"score\" AS TEXT), '\\N')" in statement
+    assert "COALESCE(REPLACE(CAST(\"score\" AS TEXT), '\\', '\\\\'), '\\N')" in statement
     assert "UPPER(ENCODE(\"fingerprint\", 'hex'))" in statement
     assert params == [10, 20]
 
@@ -150,7 +150,7 @@ def test_duckdb_casts_to_varchar_and_hashes_sha256_natively():
     dialect = DuckDB(algorithm="sha256")
     statement, _params = dialect.checksum_sql("m", PK, COLUMNS, None, None)
     assert "SHA256(" in statement
-    assert "COALESCE(CAST(\"note\" AS VARCHAR), '\\N')" in statement
+    assert "COALESCE(REPLACE(CAST(\"note\" AS VARCHAR), '\\', '\\\\'), '\\N')" in statement
 
 
 # -- registry and quoting --------------------------------------------------

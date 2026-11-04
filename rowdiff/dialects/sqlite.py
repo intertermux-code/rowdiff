@@ -100,7 +100,7 @@ class SQLite(Dialect):
         if column.category == "bytes":
             return "(CASE WHEN %s IS NULL THEN %s ELSE 'x' || HEX(%s) END)" % (
                 ref, self.null_literal(), ref)
-        return "COALESCE(CAST(%s AS TEXT), %s)" % (ref, self.null_literal())
+        return "COALESCE(REPLACE(CAST(%s AS TEXT), '\\', '\\\\'), %s)" % (ref, self.null_literal())
 
     def row_expr(self, columns):
         # concat_ws() only exists in SQLite 3.44+, so join with the operator.

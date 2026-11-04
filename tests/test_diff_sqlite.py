@@ -473,3 +473,29 @@ def test_composite_pk_null_first_multi_chunk_single_detail(tmp_path):
     assert changed[0]["pk"] == [None, "b30"]
     assert changed[0]["columns"][0]["name"] == "c"
 
+
+def test_backslash_n_vs_null_reports_drift(sqlite_pair, tmp_path):
+    left, right = sqlite_pair(
+        mutate_right=lambda rows: with_row(rows, 42, "note", "\\N"))
+    report = diff(left, right, state_file=str(tmp_path / "state.sqlite3"))
+    assert report["status"] == "drift"
+    changed = [c for c in report["chunks"]
+               if c["status"] == MISMATCHED][0]["row_diff"]["changed"]
+    assert changed[0]["pk"] == [42]
+    assert changed[0]["columns"][0]["name"] == "note"
+    assert changed[0]["columns"][0]["left"] == "\\N"
+    assert changed[0]["columns"][0]["right"] == "\\\\N"
+
+
+def test_identical_backslash_n_tables_ok(sqlite_pair, tmp_path):
+    left, right = sqlite_pair(
+        mutate_right=lambda rows: with_row(rows, 43, "note", "\\N"),
+        mutate_left=lambda rows: with_row(rows, 43, "note", "\\N"))
+    report = diff(left, right, state_file=str(tmp_path / "state.sqlite3"))
+    assert all(c["status"] == MATCHED for c in report["chunks"])
+
+
+def test_identical_null_tables_ok(sqlite_pair, tmp_path):
+    left, right = sqlite_pair()
+    report = diff(left, right, state_file=str(tmp_path / "state.sqlite3"))
+    assert all(c["status"] == MATCHED for c in report["chunks"])

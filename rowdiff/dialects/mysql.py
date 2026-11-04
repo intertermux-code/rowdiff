@@ -85,7 +85,7 @@ class MySQL(Dialect):
         if column.category == "bytes":
             return "(CASE WHEN %s IS NULL THEN %s ELSE CONCAT('x', HEX(%s)) END)" % (
                 ref, null, ref)
-        return "(COALESCE(CAST(%s AS CHAR), %s))" % (ref, null)
+        return "(COALESCE(REPLACE(CAST(%s AS CHAR), '\\', '\\\\'), %s))" % (ref, null)
 
     def row_expr(self, columns):
         # CHAR(31) is VARBINARY here, which would poison the digest input.
