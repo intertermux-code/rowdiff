@@ -47,7 +47,10 @@ class DSN:
         else:
             self.path = None
             self.host = parsed.hostname or "localhost"
-            self.port = parsed.port
+            try:
+                self.port = parsed.port
+            except ValueError:
+                raise ConfigError("invalid port in data source URI")
             self.user = parsed.username
             self.password = parsed.password
             self.database = parsed.path.lstrip("/") or None

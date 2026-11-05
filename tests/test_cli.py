@@ -96,6 +96,23 @@ def test_bad_dsn_is_reported_without_a_traceback(tmp_path, capsys):
     assert code == EXIT_ERROR
     assert "unknown data source scheme" in capsys.readouterr().err
 
+def test_bad_port_uri_is_reported_without_a_traceback(tmp_path, capsys):
+    code = main(["diff", "--left", "postgresql://host:99999/db", "--right", "sqlite://x.db",
+                 "--table", "t", "--state", str(tmp_path / "s.sqlite3")])
+    assert code == EXIT_ERROR
+    err = capsys.readouterr().err
+    assert "invalid port" in err
+    assert "Traceback" not in err
+
+
+def test_non_numeric_port_uri_is_reported_without_a_traceback(tmp_path, capsys):
+    code = main(["diff", "--left", "postgresql://host:abc/db", "--right", "sqlite://x.db",
+                 "--table", "t", "--state", str(tmp_path / "s.sqlite3")])
+    assert code == EXIT_ERROR
+    err = capsys.readouterr().err
+    assert "invalid port" in err
+    assert "Traceback" not in err
+
 
 def test_missing_state_directory_is_a_clean_error(tmp_path, sqlite_pair, capsys):
     left, right = sqlite_pair()

@@ -39,6 +39,17 @@ def test_bad_uris_are_rejected():
             parse_dsn(uri)
 
 
+def test_bad_port_uris_are_rejected():
+    for uri in ("postgres://u:p@h:99999/db", "postgres://u:p@h:abc/db"):
+        with pytest.raises(ConfigError, match="invalid port"):
+            parse_dsn(uri)
+
+
+def test_valid_port_uri_parses():
+    dsn = parse_dsn("postgres://u:p@h:5432/db")
+    assert dsn.port == 5432
+
+
 def test_dsn_repr_never_leaks_the_password():
     dsn = parse_dsn("mysql://root:pw@127.0.0.1/shop")
     assert "pw" not in repr(dsn)
