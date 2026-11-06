@@ -95,7 +95,7 @@ class SQLite(Dialect):
         ref = self.quote(column.name)
         if column.category == "bool":
             return ("(CASE WHEN %s IS NULL THEN %s WHEN CAST(%s AS TEXT)"
-                    " IN ('0', 'false', 'f', 'no', '') THEN 'false'"
+                    " IN ('0', 'false', 'f', 'no', 'n', '') THEN 'false'"
                     " ELSE 'true' END)" % (ref, self.null_literal(), ref))
         if column.category == "bytes":
             return "(CASE WHEN %s IS NULL THEN %s ELSE 'x' || HEX(%s) END)" % (

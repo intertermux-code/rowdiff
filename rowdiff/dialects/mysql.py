@@ -80,7 +80,7 @@ class MySQL(Dialect):
         null = self.null_literal()
         if column.category == "bool":
             return ("(CASE WHEN %s IS NULL THEN %s WHEN LOWER(CAST(%s AS CHAR))"
-                    " IN ('0', 'false', 'f', 'no', '') THEN 'false'"
+                    " IN ('0', 'false', 'f', 'no', 'n', '') THEN 'false'"
                     " ELSE 'true' END)" % (ref, null, ref))
         if column.category == "bytes":
             return "(CASE WHEN %s IS NULL THEN %s ELSE CONCAT('x', HEX(%s)) END)" % (
