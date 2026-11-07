@@ -94,10 +94,14 @@ class SQLite(Dialect):
     def column_expr(self, column):
         ref = self.quote(column.name)
         if column.category == "bool":
-            # The fallback lowercases before matching, so SQL has to fold case
-            # too: without it 'N' digests true in the database, false in here.
+            # The fallback lowercases and strips before matching, so SQL must do
+            # the same: without TRIM, ' N' digests true in the database and false
+            # in here, and a table that differs only by padding looks drifted.
+            # SQLite's bare TRIM removes spaces only, so trim the full ASCII
+            # whitespace set to match Python's strip() on the spellings we compare.
             return ("(CASE WHEN %s IS NULL THEN %s"
-                    " WHEN LOWER(CAST(%s AS TEXT))"
+                    " WHEN LOWER(TRIM(CAST(%s AS TEXT),"
+                    " char(9)||char(10)||char(11)||char(12)||char(13)||' '))"
                     " IN ('0', 'false', 'f', 'no', 'n', '') THEN 'false'"
                     " ELSE 'true' END)" % (ref, self.null_literal(), ref))
         if column.category == "bytes":

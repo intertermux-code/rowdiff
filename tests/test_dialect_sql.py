@@ -119,7 +119,8 @@ def test_mysql_tinyint_one_is_a_boolean_not_a_number():
     dialect = MySQL()
     column = Column("shipped", "tinyint", "tinyint(1)")
     assert column.category == "bool"
-    assert "LOWER(CAST(`shipped` AS CHAR))" in dialect.column_expr(column)
+    expr = dialect.column_expr(column)
+    assert "LOWER(REGEXP_REPLACE(CAST(`shipped` AS CHAR)" in expr
     assert Column("count", "tinyint", "tinyint(4)").category == "number"
 
 

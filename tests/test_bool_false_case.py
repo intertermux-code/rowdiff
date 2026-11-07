@@ -112,12 +112,15 @@ def test_sqlite_pushdown_still_reads_true_spellings_as_true(text, tmp_path):
 
 
 def test_sqlite_pushdown_bool_expr_folds_case():
-    assert 'LOWER(CAST("flag" AS TEXT))' in SQLite().column_expr(BOOL_COL)
+    expr = SQLite().column_expr(BOOL_COL)
+    assert 'LOWER(TRIM(CAST("flag" AS TEXT)' in expr
+    assert "char(9)" in expr
 
 
 def test_mysql_pushdown_bool_expr_still_folds_case():
-    """Unchanged, and already case-insensitive: the fold stays in place."""
-    assert "LOWER(CAST(`flag` AS CHAR))" in MySQL().column_expr(BOOL_COL)
+    """Still case-insensitive and now trims, matching the fallback."""
+    expr = MySQL().column_expr(BOOL_COL)
+    assert "LOWER(REGEXP_REPLACE(CAST(`flag` AS CHAR)" in expr
 
 
 def test_sqlite_pushdown_and_fallback_agree_on_a_mixed_case_column(tmp_path):

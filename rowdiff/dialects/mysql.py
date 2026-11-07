@@ -79,7 +79,15 @@ class MySQL(Dialect):
         ref = self.quote(column.name)
         null = self.null_literal()
         if column.category == "bool":
-            return ("(CASE WHEN %s IS NULL THEN %s WHEN LOWER(CAST(%s AS CHAR))"
+            # The fallback lowercases and strips before matching, so SQL must do
+            # the same: without TRIM, whitespace-padded spellings digest true in
+            # the database and false in here, and padding-only differences drift.
+            # REGEXP_REPLACE trims [[:space:]], which in MySQL 8.0+ ICU regex and
+            # MariaDB PCRE covers ASCII whitespace including \t \n \v \f \r and
+            # space, matching the ASCII set Python's strip() removes here.
+            return ("(CASE WHEN %s IS NULL THEN %s"
+                    " WHEN LOWER(REGEXP_REPLACE(CAST(%s AS CHAR),"
+                    " '^[[:space:]]+|[[:space:]]+$', ''))"
                     " IN ('0', 'false', 'f', 'no', 'n', '') THEN 'false'"
                     " ELSE 'true' END)" % (ref, null, ref))
         if column.category == "bytes":
