@@ -94,7 +94,10 @@ class SQLite(Dialect):
     def column_expr(self, column):
         ref = self.quote(column.name)
         if column.category == "bool":
-            return ("(CASE WHEN %s IS NULL THEN %s WHEN CAST(%s AS TEXT)"
+            # The fallback lowercases before matching, so SQL has to fold case
+            # too: without it 'N' digests true in the database, false in here.
+            return ("(CASE WHEN %s IS NULL THEN %s"
+                    " WHEN LOWER(CAST(%s AS TEXT))"
                     " IN ('0', 'false', 'f', 'no', 'n', '') THEN 'false'"
                     " ELSE 'true' END)" % (ref, self.null_literal(), ref))
         if column.category == "bytes":

@@ -146,7 +146,7 @@ encodings:
 | NULL | `\N` | `COALESCE(CAST(c AS TEXT), '\N')` |
 | text | as stored | `CAST(c AS TEXT)` |
 | number | dialect's own cast | `CAST(c AS TEXT)` / `c::text` |
-| boolean | `true` / `false` | `CASE WHEN c IS NULL … WHEN c IN (0,'false',…) THEN 'false' ELSE 'true' END` / `CASE WHEN c THEN 'true' ELSE 'false' END` |
+| boolean | `true` / `false` | `CASE WHEN c IS NULL … WHEN LOWER(CAST(c AS TEXT)) IN (0,'false',…) THEN 'false' ELSE 'true' END` / `CASE WHEN c THEN 'true' ELSE 'false' END` |
 | binary | `x` + uppercase hex | `'x' \|\| HEX(c)` / `'x' \|\| UPPER(ENCODE(c,'hex'))` |
 | date/time | dialect's own cast | `CAST(c AS TEXT)` / `c::text` |
 
@@ -357,7 +357,7 @@ rowdiff diff --left "$SRC" --right "$DST" --table orders --format json --quiet \
 
 ```sh
 pip install -e ".[dev]"
-pytest                      # 179 tests, no network, no servers
+pytest                      # 216 tests, no network, no servers
 pytest -q tests/test_diff_sqlite.py
 ```
 
